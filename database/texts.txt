@@ -1,0 +1,7 @@
+[INTRO0]
+"Wilkommen zu meinem C++ Kurs"
+"Ich werde euch einiges zeigen!"
+; bla bla
+"Viel Spass!"
+[SECTION0]
+"keine daten"
