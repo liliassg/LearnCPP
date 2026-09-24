@@ -2,6 +2,7 @@
 #include<stdint.h>
 #include<vector>
 #include<string>
+#include<string_view>
 #include<iostream>
 
 namespace util {
@@ -162,8 +163,9 @@ class Terminal {
         int offsetX{};
         int offsetY{};
     };
-    // Structure an Segment Drawer, to store written Text by position inside the box
-    struct SegmentDrawer {
+    // Structure an Segment Text, to store written Text by position inside the box
+    struct SegmentText {
+        std::string initialID{};
         std::string text{};
         Position textPos{};
     };
@@ -173,7 +175,7 @@ class Terminal {
         Offset offset{};
         int innerWidthSpace{}; // represent the maximum space of lines fitting Vertical inside the box, determined by width*height*offsetX
         int innerHeightSpace{}; // represent the maximum space of lines fitting Horizontal inside the box, determined by width*height*offsetY
-        std::vector<SegmentDrawer> segmentContent{};
+        std::vector<SegmentText> segmentContent{};
         Style::Color background{};
     };
     // Structure an Segment (used for defining an Box within the console for drawning inside)
@@ -193,6 +195,30 @@ class Terminal {
     */
     // getColorSequence: used by getSequence to determine Color
     std::string getColorSequence(Style::Color) {}
+    // allEqualTo: is a helper made to check if all values are the same, for eg. defaulkts like -1, if all are -1 then it should be a non-set
+    bool allEqualTo(std::vector<int> defaults) {
+        int first{};
+        for (int i = 0; i < defaults.size(); i++) {
+            if (i == 0) {
+                first = defaults[0];
+                continue;
+            }
+            if (first != defaults[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+    // allEqualTo(2): is a helper made to check if all values are the same, specified by a defaultValue
+    bool allEqualTo(std::vector<int> defaults, int defaultValue) {
+        int first = defaultValue;
+        for (int i = 0; i < defaults.size(); i++) {
+            if (first != defaults[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
     // getSequence: get an ANSI escape sequence by sepecify sequence and pass a vector of integars
     std::string getSequence(ANSI_SEQUENCES seq, std::vector<int>& intData) {
         size_t passedDataSize = intData.size();
@@ -223,7 +249,7 @@ class Terminal {
     // createOffset: create an Offset object
     static Offset createOffset(int x, int y) {}
     // createSegment: create an Segment object
-    Segment createSegment(std::string id, Position pos = {0, 0}, Size box = {0, 0}, Offset offset = {10, 10}) {
+    Segment createSegment(const std::string_view id, Position pos = {0, 0}, Size box = {0, 0}, Offset offset = {10, 10}) {
         Segment segment{};
         segment.initalID = id;
 
@@ -244,12 +270,87 @@ class Terminal {
     /*
         Segment Methods
     */
-    void segmentWriteText(Segment& seg, std::string text, Position startingPos) { SegmentDrawer segmentEntity{}; }
-    void segmentWriteLines(Segment& seg, std::vector<std::string> lines, Position startingPos) {}
-    void segmentAddText(Segment& seg, std::string text) {}
-    void segmentAddLines(Segment& seg, std::vector<std::string> lines) {}
-    void segmentClear(Segment& seg) {}
-    void segmentModify(Segment& seg, Position newPos, Size newBox, Offset newOffset) {}
+   // segmentWriteText: create a new SegmentText object and pass it into the Segment
+    void segmentWriteText(const std::string_view textID, Segment& seg, std::string text, Position startingPos = {0, 0}) { 
+        SegmentText segmentText{}; 
+        segmentText.textPos = startingPos;
+        segmentText.text = text;
+        segmentText.initialID = textID;
+        seg.box.segmentContent.push_back(segmentText);
+   }
+    // segmentWriteLines: create a new SegmentText object and pass it into the Segment
+    void segmentWriteLines(Segment& seg, const std::string_view textID, std::vector<std::string> lines, Position startingPos = {0, 0}) {  
+        SegmentText segmentText{};
+        segmentText.textPos = startingPos;
+        segmentText.initialID = textID;
+        for (int i = 0; i < lines.size(); i++) {
+            segmentText.text += lines.at(i);
+        }
+        seg.box.segmentContent.push_back(segmentText);
+    }
+    // segmentAddText: write text into an existing SegmentText object, specified by its ID
+    void segmentAddText(Segment& seg, const std::string_view textID, std::string text) {
+        int pos = getSegmentTextIDIndex(seg, textID);
+        if (pos == -1) {
+            std::cout << "segmentAddText: operation failed, textID not found!\n";
+            return;
+        }
+        seg.box.segmentContent[pos].text += text;
+    }
+    // segmentAddLines: write text into an existing SegmentText object, specified by its ID
+    void segmentAddLines(Segment& seg, const std::string_view textID, std::vector<std::string> lines) {
+        int pos = getSegmentTextIDIndex(seg, textID);
+        if (pos == -1) {
+            std::cout << "segmentAddLines: operation failed, textID not found!\n";
+            return;
+        }
+        for (int i = 0; i < lines.size(); i++) {
+            seg.box.segmentContent[pos].text += lines.at(i);
+        }
+    }
+    // segmentClear: clear text on an SegmentText, specified by an textID, or none to clear it fully
+    void segmentClear(Segment& seg, const std::string_view textID = "NONE@NULL") {
+        if (textID == "NONE@NULL") {
+            seg.box.segmentContent.clear();
+            return;
+        }
+        int pos = getSegmentTextIDIndex(seg, textID);
+        if (pos == -1) {
+            std::cout << "segmentClear: operation failed, textID not found!\n";
+            return;
+        }
+        seg.box.segmentContent[pos].text.clear();
+        return;
+    }
+    // segmentModify: modify an Segment's data, pass only the needed modifications, required, eg. segmentModify(myseg, newSize={100, 100});
+    void segmentModify(Segment& seg, Position newPos = {-1, -1}, Size newSize = {-1, -1}, Offset newOffset = {-1, -1}) {
+        if (!allEqualTo({newPos.x, newPos.y}, -1)) {
+            seg.location.x = newPos.x;
+            seg.location.y = newPos.y;
+        }
+        if (!allEqualTo({newOffset.offsetX, newOffset.offsetY}, -1)) {
+            seg.box.offset.offsetX = newOffset.offsetX;
+            seg.box.offset.offsetY = newOffset.offsetY;
+        }
+        if (!allEqualTo({newSize.height, newSize.width}, -1)) {
+            seg.box.size.height = newSize.height;
+            seg.box.size.width = newSize.width;
+        }
+        return; 
+    }
+    /*
+        Segment Methods: 
+            *SegmentText
+    */
+   // getSegmentTextIDIndex: get index of the SegmentTextID inside the Segment, returns -1 if not found
+    int getSegmentTextIDIndex(const Segment& seg, std::string_view searchedID) {
+        for (int i = 0; i < seg.box.segmentContent.size(); i++) {
+            if (seg.box.segmentContent.at(i).initialID == searchedID) {
+                return i;
+            }
+        }
+        return -1;
+    }
     /*
         Box Render Methods
     */
