@@ -7,15 +7,15 @@
 
 namespace util {
     // Slice a Vector and get its n elements from begin (eg. what=3, returns 0, 1, 2)
-    std::vector<int> getIndexesOfVector(std::vector<int>& vec, int what) {
+    inline std::vector<int> getIndexesOfVector(std::vector<int>& vec, const int what) {
         size_t sizeofVec = vec.size();
         std::vector<int> indexes{};
-        for (int i = 0; i < what || i <= sizeofVec; i++) {
+        for (int i = 0; i < what && i < sizeofVec; i++) {
             indexes.push_back(vec.at(i));
         }
         if (what > indexes.size()) {
             std::cout << "util::getIndexesOfVector: error returning requested sizes '" << what << "' vector is too tiny!" << std::endl;
-            for (int missing = what - indexes.size(); missing >= indexes.size(); missing++) { // flood missing indexes to prevent segfault
+            while (what > indexes.size()) { // flood missing indexes to prevent segfault
                 indexes.push_back(0);
             }
         }
@@ -60,7 +60,9 @@ class Style {
         LIGHT_GRAY,
 
         BLACK,
-        WHITE
+        WHITE,
+
+        DEFAULT
     };
     // Structure an Color (used for Style Text within the console)
     struct Color {
@@ -72,8 +74,9 @@ class Style {
     /*
         Color Methods
     */
-   // createColorByInt: 
+   // createColorByInt: create ab Color object, by passing r, g, b as integers
     static Color createColorByInt(int r, int g, int b) {}
+// createColor: create an Color object by passing enum Style::ColorRGB
     static Color createColor(Style::ColorRGB col) {
         Color colorObject{};
         colorObject.enumCol = col;
@@ -130,6 +133,9 @@ class Style {
                 break;
             default:
                 std::cout << "unkown color!\n";
+                colorObject.b = -1;
+                colorObject.g = -1;
+                colorObject.r = -1;
                 break;
         }
         return colorObject;
@@ -141,7 +147,6 @@ class Terminal {
     /*
         Class Globals
     */
-    Style style;
     // Handle any type of ANSI Escape Sequences
     enum class ANSI_SEQUENCES {
         COLOR,
@@ -168,6 +173,7 @@ class Terminal {
         std::string initialID{};
         std::string text{};
         Position textPos{};
+        Style::Color background{};
     };
     // Structure an Box, the actual renderd logic for texts
     struct Box {
@@ -180,7 +186,7 @@ class Terminal {
     };
     // Structure an Segment (used for defining an Box within the console for drawning inside)
     struct Segment {
-        std::string initalID{};
+        std::string initialID{};
         Position location{};
         Box box{};
         bool visible{};
@@ -189,7 +195,12 @@ class Terminal {
     struct Layout {
         Style::Color background;
         std::vector<Segment> segments;
+        bool visable{};
     };
+    /*
+        Class globals (after structures)
+    */
+    Layout* mainLayout{}; 
     /*
         Classdef Methods
     */
@@ -236,22 +247,42 @@ class Terminal {
                 break;
             default:
                 std::cout << "unkown enumtype ansi sequence\n";
-                return nullptr;
+                return "";
         }
     }
     // setCursor: set the console-cursor to a position {x, y}
     void setCursor(Position location) {}
-    // createColor: create an Color object
+    // createLayout: create an Layout Object (the main widget all Segments are attached to)
+    Layout createLayout(Style::ColorRGB color = Style::ColorRGB::DEFAULT) {
+        Layout newLayout;
+        Style::Color col = Style::createColor(color);
+        if (allEqualTo({col.r, col.g, col.b}, -1)) {
+            return newLayout;
+        }
+        newLayout.background = col;
+        return newLayout;
+    }
     // createPosition: create an Position object
-    static Position createPosition(int x = 0, int y = 0) {}
+    static Position createPosition(int x = 0, int y = 0) {
+        Position posObj{x, y};
+        return posObj;
+    }
     // createSize: create an Size object  
-    static Size createSize(int height, int length) {}
+    static Size createSize(int height, int width) {
+        Size sizeObj;
+        sizeObj.height = height;
+        sizeObj.width = width;
+        return sizeObj;
+    }
     // createOffset: create an Offset object
-    static Offset createOffset(int x, int y) {}
+    static Offset createOffset(int x, int y) {
+        Offset offsetObj{x, y};
+        return offsetObj;
+    }
     // createSegment: create an Segment object
     Segment createSegment(const std::string_view id, Position pos = {0, 0}, Size box = {0, 0}, Offset offset = {10, 10}) {
         Segment segment{};
-        segment.initalID = id;
+        segment.initialID = id;
 
         segment.location.x = pos.x;
         segment.location.y = pos.y;
@@ -266,6 +297,39 @@ class Terminal {
         segment.box.innerHeightSpace = boxCalculateInnerHeightSpace(segment.box);
 
         return segment;
+    }
+    /*
+        Layout Methods
+    */
+   // layoutAddSegment: save a Segment into the Layout, returns adress of stored Segment
+    Segment& layoutAddSegment(Layout& layout, Segment& seg) {
+        layout.segments.push_back(std::move(seg));
+        return layout.segments.back();
+    }
+    // layoutGetSegment: returns the Adress of an Segment specified by the Segment ID
+    Segment* layoutGetSegment(Layout& layout, std::string_view segmentID) {
+        for (auto& s : layout.segments) {
+            if (s.initialID == segmentID) {
+                return &s;
+            }
+        }
+        return nullptr;
+    }
+    // layoutRemoveSegment: removes an Segment from the Layout, specified by the Segment ID
+    void layoutRemoveSegment(Layout& layout, std::string_view segmentID) {
+        for (int i = 0; i < layout.segments.size(); i++) {
+            if (layout.segments[i].initialID == segmentID) {
+                layout.segments.erase(layout.segments.begin() + i);
+                return;
+            }
+        }
+        std::cout << "layoutRemoveSegment: operation failed. Segment with id: " << segmentID << " was not found!\n";
+        return;
+    }
+    // layoutVisable: set your layout as the main-rendered-layout 
+    void layoutSetVisable(Layout& layout) {
+        mainLayout = &layout;
+        return;
     }
     /*
         Segment Methods
@@ -292,7 +356,7 @@ class Terminal {
     void segmentAddText(Segment& seg, const std::string_view textID, std::string text) {
         int pos = getSegmentTextIDIndex(seg, textID);
         if (pos == -1) {
-            std::cout << "segmentAddText: operation failed, textID not found!\n";
+            std::cout << "segmentAddText: operation failed, no such textID: " << textID << "\n";
             return;
         }
         seg.box.segmentContent[pos].text += text;
@@ -301,7 +365,7 @@ class Terminal {
     void segmentAddLines(Segment& seg, const std::string_view textID, std::vector<std::string> lines) {
         int pos = getSegmentTextIDIndex(seg, textID);
         if (pos == -1) {
-            std::cout << "segmentAddLines: operation failed, textID not found!\n";
+            std::cout << "segmentAddLines: operation failed, no such textID: " << textID << "\n";
             return;
         }
         for (int i = 0; i < lines.size(); i++) {
@@ -316,7 +380,7 @@ class Terminal {
         }
         int pos = getSegmentTextIDIndex(seg, textID);
         if (pos == -1) {
-            std::cout << "segmentClear: operation failed, textID not found!\n";
+            std::cout << "segmentClear: operation failed, no such textID: " << textID << "\n";
             return;
         }
         seg.box.segmentContent[pos].text.clear();
@@ -331,6 +395,8 @@ class Terminal {
         if (!allEqualTo({newOffset.offsetX, newOffset.offsetY}, -1)) {
             seg.box.offset.offsetX = newOffset.offsetX;
             seg.box.offset.offsetY = newOffset.offsetY;
+            seg.box.innerHeightSpace = boxCalculateInnerHeightSpace(seg.box);
+            seg.box.innerWidthSpace = boxCalculateInnerWidthSpace(seg.box);
         }
         if (!allEqualTo({newSize.height, newSize.width}, -1)) {
             seg.box.size.height = newSize.height;
@@ -338,18 +404,41 @@ class Terminal {
         }
         return; 
     }
+    // segmentVisable: determine if a Segment is visable or not
+    void segmentVisable(Segment& seg, const bool status) {
+        seg.visible = status;
+    }
+    void segmentSetBackground(Segment& seg, Style::ColorRGB color) {
+        Style::Color col = Style::createColor(color);
+        if (allEqualTo({col.r, col.g, col.b}, -1)) {
+            return;
+        }
+        seg.box.background = col;
+    }
     /*
         Segment Methods: 
             *SegmentText
     */
    // getSegmentTextIDIndex: get index of the SegmentTextID inside the Segment, returns -1 if not found
-    int getSegmentTextIDIndex(const Segment& seg, std::string_view searchedID) {
+    int getSegmentTextIDIndex(const Segment& seg, const std::string_view searchedID) {
         for (int i = 0; i < seg.box.segmentContent.size(); i++) {
             if (seg.box.segmentContent.at(i).initialID == searchedID) {
                 return i;
             }
         }
         return -1;
+    }
+    void setSegmentTextBackground(Segment& seg, std::string_view textID, Style::ColorRGB color) {
+        int pos = getSegmentTextIDIndex(seg, textID);
+        if (pos == -1) {
+            std::cout << "setSegmentTextBackground: operation failed! no such textID: " << textID << "\n";
+            return;
+        }
+        Style::Color col = Style::createColor(color);
+        if (allEqualTo({col.r, col.g, col.b}, -1)) {
+            return;
+        }
+        seg.box.segmentContent[pos].background = col;
     }
     /*
         Box Render Methods
